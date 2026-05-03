@@ -1,174 +1,102 @@
-# ============================================================
-# collect_files.ps1
-# סקריפט איסוף קבצי דיגום ארובות
-# הרץ כ: PowerShell -ExecutionPolicy Bypass -File collect_files.ps1
-# ============================================================
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
-# --- הגדרות ---
 $OutputFolder = "C:\COLLECTED_FILES\דיגום_ארובות_$(Get-Date -Format 'yyyy-MM-dd')"
 $LogFile      = "$OutputFolder\_סיכום_איסוף.txt"
-
-# תיקיות לסריקה (כל הדיסקים הזמינים)
 $DrivesToScan = (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 }).Root
 
-# סיומות קבצים לאיסוף
-$Extensions = @(
-    "*.pdf",
-    "*.doc", "*.docx",
-    "*.xls", "*.xlsx",
-    "*.ppt", "*.pptx",
-    "*.txt",
-    "*.csv",
-    "*.xml",
-    "*.zip", "*.rar", "*.7z",
-    "*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff",
-    "*.dwg", "*.dxf"
-)
+$Extensions = @("*.pdf","*.doc","*.docx","*.xls","*.xlsx","*.ppt","*.pptx",
+                "*.txt","*.csv","*.xml","*.zip","*.rar","*.7z",
+                "*.jpg","*.jpeg","*.png","*.tif","*.tiff","*.dwg","*.dxf")
 
-# מילות מפתח לסינון (קבצים שמכילים אחת מהמילים האלה בשמם)
-$Keywords = @(
-    "ארוב", "ארובה", "ארובות",
-    "דיגום", "דגימ",
-    "פליטה", "פליטות",
-    "נוהל", "נהלים",
-    "טופס", "טפסים",
-    "בדיקה", "בדיקות",
-    "מדידה", "מדידות",
-    "emission", "stack", "chimney",
-    "sampling", "monitoring",
-    "protocol", "procedure",
-    "form", "report", "דוח"
-)
+$Keywords = @("ארוב","ארובה","ארובות","דיגום","דגימ","פליטה","פליטות",
+              "נוהל","נהלים","טופס","טפסים","בדיקה","בדיקות","מדידה","מדידות",
+              "emission","stack","chimney","sampling","monitoring",
+              "protocol","procedure","form","report","דוח")
 
-# תיקיות לדלג עליהן (מערכת)
-$ExcludeFolders = @(
-    "C:\Windows",
-    "C:\Program Files",
-    "C:\Program Files (x86)",
-    "C:\ProgramData\Microsoft",
-    "C:\Users\All Users\Microsoft"
-)
+$ExcludeFolders = @("C:\Windows","C:\Program Files","C:\Program Files (x86)","C:\ProgramData\Microsoft","C:\Users\All Users\Microsoft")
 
-# ============================================================
-# יצירת תיקיית פלט
-# ============================================================
-Write-Host "`n=== סקריפט איסוף קבצי דיגום ארובות ===" -ForegroundColor Cyan
-Write-Host "תיקיית יעד: $OutputFolder" -ForegroundColor Yellow
+New-Item -ItemType Directory -Force -Path "$OutputFolder\PDF"     | Out-Null
+New-Item -ItemType Directory -Force -Path "$OutputFolder\Word"    | Out-Null
+New-Item -ItemType Directory -Force -Path "$OutputFolder\Excel"   | Out-Null
+New-Item -ItemType Directory -Force -Path "$OutputFolder\תמונות"  | Out-Null
+New-Item -ItemType Directory -Force -Path "$OutputFolder\שונות"   | Out-Null
 
-New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
-New-Item -ItemType Directory -Path "$OutputFolder\PDF"        -Force | Out-Null
-New-Item -ItemType Directory -Path "$OutputFolder\Word"       -Force | Out-Null
-New-Item -ItemType Directory -Path "$OutputFolder\Excel"      -Force | Out-Null
-New-Item -ItemType Directory -Path "$OutputFolder\תמונות"     -Force | Out-Null
-New-Item -ItemType Directory -Path "$OutputFolder\שונות"      -Force | Out-Null
-
-# ============================================================
-# פונקציה: קביעת תת-תיקייה לפי סיומת
-# ============================================================
-function Get-TargetSubfolder($ext) {
-    switch ($ext.ToLower()) {
-        ".pdf"  { return "PDF" }
-        ".doc"  { return "Word" }
-        ".docx" { return "Word" }
-        ".xls"  { return "Excel" }
-        ".xlsx" { return "Excel" }
-        ".jpg"  { return "תמונות" }
-        ".jpeg" { return "תמונות" }
-        ".png"  { return "תמונות" }
-        ".tif"  { return "תמונות" }
-        ".tiff" { return "תמונות" }
-        default { return "שונות" }
+function Get-Sub($e) {
+    switch ($e.ToLower()) {
+        ".pdf"  {"PDF"}  ".doc"  {"Word"} ".docx" {"Word"}
+        ".xls"  {"Excel"} ".xlsx" {"Excel"}
+        ".jpg"  {"תמונות"} ".jpeg" {"תמונות"} ".png" {"תמונות"}
+        ".tif"  {"תמונות"} ".tiff" {"תמונות"}
+        default {"שונות"}
     }
 }
 
-# ============================================================
-# סריקה
-# ============================================================
-$AllFound    = @()
-$Copied      = 0
-$Skipped     = 0
-$Errors      = 0
+$Copied = 0; $Errors = 0; $AllFound = @()
+$TotalDrives = $DrivesToScan.Count
+$DriveIndex  = 0
 
-Write-Host "`nמתחיל סריקה על: $($DrivesToScan -join ', ')" -ForegroundColor Green
+Write-Host "`n=== איסוף קבצי דיגום ארובות ===" -ForegroundColor Cyan
+Write-Host "דיסקים לסריקה: $($DrivesToScan -join ', ')" -ForegroundColor Yellow
 
 foreach ($Drive in $DrivesToScan) {
-    Write-Host "`nסורק: $Drive" -ForegroundColor White
+    $DriveIndex++
+    $DrivePct = [int](($DriveIndex / $TotalDrives) * 100)
+
+    Write-Progress -Id 1 -Activity "סריקת דיסקים" `
+        -Status "דיסק $DriveIndex מתוך $TotalDrives : $Drive" `
+        -PercentComplete $DrivePct
+
+    $ExtIndex  = 0
+    $TotalExts = $Extensions.Count
 
     foreach ($Ext in $Extensions) {
-        try {
-            $Files = Get-ChildItem -Path $Drive -Filter $Ext -Recurse -ErrorAction SilentlyContinue |
-                Where-Object {
-                    # דלג על תיקיות מערכת
-                    $skip = $false
-                    foreach ($ex in $ExcludeFolders) {
-                        if ($_.FullName.StartsWith($ex)) { $skip = $true; break }
-                    }
-                    -not $skip
-                }
+        $ExtIndex++
+        $ExtPct = [int](($ExtIndex / $TotalExts) * 100)
 
-            foreach ($File in $Files) {
-                # בדוק אם שם הקובץ מכיל מילת מפתח, או אסוף הכל אם לא צוינו מילות מפתח
-                $matchesKeyword = $false
-                foreach ($kw in $Keywords) {
-                    if ($File.Name -match $kw -or $File.DirectoryName -match $kw) {
-                        $matchesKeyword = $true
-                        break
-                    }
-                }
+        Write-Progress -Id 2 -ParentId 1 -Activity "סוג קובץ" `
+            -Status "מחפש $Ext  |  נאספו עד כה: $Copied קבצים" `
+            -PercentComplete $ExtPct
 
-                if ($matchesKeyword) {
-                    $AllFound += $File.FullName
+        Get-ChildItem -Path $Drive -Filter $Ext -Recurse -ErrorAction SilentlyContinue |
+        Where-Object {
+            $f = $_
+            $inExclude = $ExcludeFolders | Where-Object { $f.FullName.StartsWith($_) }
+            if ($inExclude) { return $false }
+            $name = $f.Name + " " + $f.DirectoryName
+            ($Keywords | Where-Object { $name -match $_ }).Count -gt 0
+        } | ForEach-Object {
 
-                    $SubFolder   = Get-TargetSubfolder $File.Extension
-                    $Destination = "$OutputFolder\$SubFolder\$($File.Name)"
+            Write-Progress -Id 3 -ParentId 2 -Activity "מעתיק" `
+                -Status "$($_.Name)" -PercentComplete 50
 
-                    # טיפול בכפילויות - הוסף מספר אם קיים
-                    if (Test-Path $Destination) {
-                        $BaseName  = [System.IO.Path]::GetFileNameWithoutExtension($File.Name)
-                        $FileExt   = $File.Extension
-                        $Counter   = 1
-                        while (Test-Path "$OutputFolder\$SubFolder\${BaseName}_${Counter}${FileExt}") { $Counter++ }
-                        $Destination = "$OutputFolder\$SubFolder\${BaseName}_${Counter}${FileExt}"
-                    }
-
-                    try {
-                        Copy-Item -Path $File.FullName -Destination $Destination -ErrorAction Stop
-                        Write-Host "  [OK] $($File.FullName)" -ForegroundColor Green
-                        $Copied++
-                    } catch {
-                        Write-Host "  [ERR] $($File.FullName): $_" -ForegroundColor Red
-                        $Errors++
-                    }
-                } else {
-                    $Skipped++
-                }
+            $sub  = Get-Sub $_.Extension
+            $dest = "$OutputFolder\$sub\$($_.Name)"
+            if (Test-Path $dest) {
+                $b = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+                $x = $_.Extension; $n = 1
+                while (Test-Path "$OutputFolder\$sub\${b}_${n}${x}") { $n++ }
+                $dest = "$OutputFolder\$sub\${b}_${n}${x}"
             }
-        } catch {
-            # תיקייה לא נגישה - המשך
+            try {
+                Copy-Item $_.FullName $dest -ErrorAction Stop
+                Write-Host "  [OK] $($_.FullName)" -ForegroundColor Green
+                $AllFound += $_.FullName; $Copied++
+            } catch {
+                Write-Host "  [ERR] $($_.FullName)" -ForegroundColor Red; $Errors++
+            }
         }
     }
+    Write-Progress -Id 2 -ParentId 1 -Activity "סוג קובץ" -Completed
 }
 
-# ============================================================
-# כתיבת לוג סיכום
-# ============================================================
-$Summary = @"
-=== סיכום איסוף קבצים ===
-תאריך: $(Get-Date -Format 'dd/MM/yyyy HH:mm')
-תיקיית יעד: $OutputFolder
+Write-Progress -Id 1 -Activity "סריקת דיסקים" -Completed
+Write-Progress -Id 3 -Activity "מעתיק" -Completed
 
-נסרקו דיסקים: $($DrivesToScan -join ', ')
-קבצים שהועתקו: $Copied
-קבצים שדולגו (לא רלוונטים): $Skipped
-שגיאות: $Errors
+"=== סיכום איסוף ===`nתאריך: $(Get-Date -Format 'dd/MM/yyyy HH:mm')`nתיקיית יעד: $OutputFolder`nדיסקים: $($DrivesToScan -join ', ')`nהועתקו: $Copied`nשגיאות: $Errors`n`n=== קבצים ===`n$($AllFound -join "`n")" |
+    Out-File $LogFile -Encoding UTF8
 
-=== רשימת קבצים שנאספו ===
-$($AllFound | ForEach-Object { "  $_" } | Out-String)
-"@
-
-$Summary | Out-File -FilePath $LogFile -Encoding UTF8
-Write-Host "`n=== סיום ===" -ForegroundColor Cyan
+Write-Host "`n=== סיום! ===" -ForegroundColor Cyan
 Write-Host "הועתקו $Copied קבצים" -ForegroundColor Green
-Write-Host "שגיאות: $Errors" -ForegroundColor $(if ($Errors -gt 0) { "Red" } else { "Green" })
-Write-Host "לוג מלא: $LogFile" -ForegroundColor Yellow
-Write-Host "פתח את התיקייה: explorer `"$OutputFolder`"" -ForegroundColor White
+Write-Host "שגיאות: $Errors" -ForegroundColor $(if ($Errors -gt 0) {"Red"} else {"Green"})
+Write-Host "לוג: $LogFile" -ForegroundColor Yellow
+explorer $OutputFolder
